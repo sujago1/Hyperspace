@@ -1,120 +1,147 @@
 #!/bin/bash
 
-# Infinite loop to keep retrying the script if any part fails
-while true; do
-    printf "\n"
-    cat <<EOF
+# Check if jq is installed, and if not, install it
+if ! command -v jq &> /dev/null; then
+    echo "❌ jq not found. Installing jq..."
+    sudo apt update && sudo apt install jq -y
+    if [ $? -eq 0 ]; then
+        echo "✅ jq installed successfully!"
+    else
+        echo "❌ Failed to install jq. Please install jq manually and re-run the script."
+        exit 1
+    fi
+else
+    echo "✅ jq is already installed."
+fi
 
-░██████╗░░█████╗░  ░█████╗░██████╗░██╗░░░██╗██████╗░████████╗░█████╗░
-██╔════╝░██╔══██╗  ██╔══██╗██╔══██╗╚██╗░██╔╝██╔══██╗╚══██╔══╝██╔══██╗
-██║░░██╗░███████║  ██║░░╚═╝██████╔╝░╚████╔╝░██████╔╝░░░██║░░░██║░░██║
-██║░░╚██╗██╔══██║  ██║░░██╗██╔══██╗░░╚██╔╝░░██╔═══╝░░░░██║░░░██║░░██║
-╚██████╔╝██║░░██║  ╚█████╔╝██║░░██║░░░██║░░░██║░░░░░░░░██║░░░╚█████╔╝
-░╚═════╝░╚═╝░░╚═╝  ░╚════╝░╚═╝░░╚═╝░░░╚═╝░░░╚═╝░░░░░░░░╚═╝░░░░╚════╝░
+# Check if aios-cli is installed, and if not, install it
+if ! command -v aios-cli &> /dev/null; then
+    echo "❌ aios-cli not found. Installing aios-cli..."
+    sudo apt update && sudo apt install aios-cli -y
+    if [ $? -eq 0 ]; then
+        echo "✅ aios-cli installed successfully!"
+    else
+        echo "❌ Failed to install aios-cli. Please install aios-cli manually and re-run the script."
+        exit 1
+    fi
+else
+    echo "✅ aios-cli is already installed."
+fi
+
+# List of general questions
+general_questions=(
+    "What is 1 x 1 = "
+    "What is 1 x 2 = "
+    ...
+    "What is 10 x 10 = "
+)
+
+# Function to get a random general question
+generate_random_general_question() {
+    echo "${general_questions[$RANDOM % ${#general_questions[@]]}"
+}
+
+# Function to handle the API request
+send_request() {
+    local message="$1"
+    local api_key="$2"
+
+    echo "📬 Sending Question: $message"
+
+    json_data=$(cat <<EOF
+{
+    "messages": [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "$message"}
+    ]
+}
 EOF
+    )
 
-    printf "\n\n"
+    response=$(curl -s -w "\n%{http_code}" -X POST "$API_URL" \
+        -H "Authorization: Bearer $api_key" \
+        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
+        -d "$json_data")
 
-    # GA CRYPTO Banner
-    GREEN="\033[0;32m"
-    RESET="\033[0m"
-    printf "${GREEN}"
-    printf "🚀 THIS SCRIPT IS PROUDLY CREATED BY **GA CRYPTO**! 🚀\n"
-    printf "Stay connected for updates:\n"
-    printf "   • Telegram: https://t.me/GaCryptOfficial\n"
-    printf "   • X (formerly Twitter): https://x.com/GACryptoO\n"
-    printf "${RESET}"
+    http_status=$(echo "$response" | tail -n 1)
+    body=$(echo "$response" | head -n -1)
 
-    # Step 1: Install HyperSpace CLI
-    echo "🚀 Installing HyperSpace CLI..."
+    # Extract the 'content' from the JSON response using jq (Suppress errors)
+    response_message=$(echo "$body" | jq -r '.choices[0].message.content' 2>/dev/null)
 
-    while true; do
-        curl -s https://download.hyper.space/api/install | bash | tee /root/hyperspace_install.log
-
-        if ! grep -q "Failed to parse version from release data." /root/hyperspace_install.log; then
-            echo "✅ HyperSpace CLI installed successfully!"
-            break
+    if [[ "$http_status" -eq 200 ]]; then
+        if [[ -z "$response_message" ]]; then
+            echo "⚠️ Response content is empty!"
         else
-            echo "❌ Installation failed. Retrying in 10 seconds..."
-            sleep 5
+            ((success_count++))  # Increment success count
+            echo "✅ [SUCCESS] Response $success_count Received!"
+            echo "📝 Question: $message"
+            echo "💬 Response: $response_message"
         fi
-    done
+    else
+        echo "⚠️ [ERROR] API request failed | Status: $http_status | Retrying..."
+        sleep 2
+    fi
+}
 
-    # Step 2: Add aios-cli to PATH and persist it
-    echo "🔄 Adding aios-cli path to .bashrc..."
-    echo 'export PATH=$PATH:$HOME/.aios' >> ~/.bashrc
-    export PATH=$PATH:$HOME/.aios
-    source ~/.bashrc
+# Asking for API Key (loops until a valid key is provided)
+while true; do
+    echo -n "Enter your API Key: "
+    read -r api_key
 
-    # Step 3: Start the Hyperspace node in a screen session
-    echo "🚀 Starting the Hyperspace node in the background..."
-    screen -S hyperspace -d -m bash -c "$HOME/.aios/aios-cli start"
+    if [ -z "$api_key" ]; then
+        echo "❌ Error: API Key is required!"
+        echo "🔄 Restarting the installer..."
 
-    # Step 4: Wait for node startup
-    echo "⏳ Waiting for the Hyperspace node to start..."
-    sleep 10
+        # Restart installer
+        rm -rf ~/gaiainstaller.sh
+        curl -O https://raw.githubusercontent.com/abhiag/Gaiatest/main/gaiainstaller.sh && chmod +x gaiainstaller.sh && ./gaiainstaller.sh 
 
-    # Step 5: Check if aios-cli is available
-    echo "🔍 Checking if aios-cli is installed..."
-    if ! command -v aios-cli &> /dev/null; then
-        echo "❌ aios-cli not found. Retrying..."
-        continue
+        exit 1
+    else
+        break  # Exit loop if API key is provided
+    fi
+done
+
+# Asking for duration
+echo -n "⏳ How many hours do you want the bot to run? "
+read -r bot_hours
+
+# Convert hours to seconds
+if [[ "$bot_hours" =~ ^[0-9]+$ ]]; then
+    max_duration=$((bot_hours * 3600))
+    echo "🕒 The bot will run for $bot_hours hour(s) ($max_duration seconds)."
+else
+    echo "⚠️ Invalid input! Please enter a number."
+    exit 1
+fi
+
+# Hidden API URL (moved to the bottom)
+API_URL="https://trump1.gaia.domains/v1/chat/completions"
+
+# Display thread information
+echo "✅ Using 1 thread..."
+echo "⏳ Waiting 30 seconds before sending the first request..."
+sleep 5
+
+echo "🚀 Starting requests..."
+start_time=$(date +%s)
+success_count=0  # Initialize success counter
+
+while true; do
+    current_time=$(date +%s)
+    elapsed=$((current_time - start_time))
+
+    if [[ "$elapsed" -ge "$max_duration" ]]; then
+        echo "🛑 Time limit reached ($bot_hours hours). Exiting..."
+        echo "📊 Total successful responses: $success_count"
+        exit 0
     fi
 
-    # Step 6: Check node status
-    echo "🔍 Checking node status..."
-    aios-cli status
+    random_message=$(generate_random_general_question)
+    send_request "$random_message" "$api_key"
 
-    # Step 7: Download the required model
-    echo "🔄 Downloading the required model..."
-
-    while true; do
-        aios-cli models add hf:TheBloke/phi-2-GGUF:phi-2.Q4_K_M.gguf | tee /root/model_download.log
-
-        if grep -q "Download complete" /root/model_download.log; then
-            echo "✅ Model downloaded successfully!"
-            break
-        else
-            echo "❌ Model download failed. Retrying in 10 seconds..."
-            sleep 5
-        fi
-    done
-
-    # Step 8: Ask for private key securely
-    echo "🔑 Enter your private key:"
-    read -p "Private Key: " private_key
-    echo $private_key > /root/my.pem
-    echo "✅ Private key saved to /root/my.pem"
-
-    # Step 9: Import private key
-    echo "🔑 Importing your private key..."
-    aios-cli hive import-keys /root/my.pem
-
-    # Step 10: Login to Hive
-    echo "🔐 Logging into Hive..."
-    aios-cli hive login
-
-    # Step 11: Connect to Hive
-    echo "🌐 Connecting to Hive..."
-    aios-cli hive connect
-
-    # Step 12: Display system info
-    echo "🖥️ Fetching system information..."
-    aios-cli system-info
-
-    # Step 13: Set Hive Tier
-    echo "🏆 Setting your Hive tier to 3..."
-    aios-cli hive select-tier 3 
-
-    # Step 14: Check Hive points in a loop every 10 seconds
-    echo "📊 Checking your Hive points every 10 seconds..."
-    echo "✅ HyperSpace Node setup complete!"
-    echo "ℹ️ Use 'CTRL + A + D' to detach the screen and 'screen -r gaspace' to reattach."
-
-    while true; do
-        echo "ℹ️ Press 'CTRL + A + D' to detach the screen, 'screen -r gaspace' to reattach."
-        aios-cli hive points
-        sleep 10
-    done
-
+    # Sleep for 4 seconds before sending the next request
+    sleep 4
 done
